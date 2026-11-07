@@ -177,79 +177,141 @@ Spun with Fridge Roulette 🎰`;
             </div>
           )}
 
-          {/* Ingredients Section */}
+          {/* Ingredients Section: Split into "From Your Kitchen" vs "Need To Buy" */}
           <div>
             <div className="flex items-center justify-between pb-1 border-b-2 border-[#2B170C]/20 mb-2">
               <h3 className="font-heading font-black text-xs sm:text-sm text-[#2B170C] uppercase tracking-wider flex items-center gap-1.5">
-                <span>🛒</span> Recipe Ingredients
+                <span>🛒</span> Kitchen Check
               </h3>
               <span className="text-xs text-emerald-900 font-black bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-400">
                 🌱 {recipe.wasteSavedLbs || 0.7} lbs rescued
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {recipe.ingredients.map((ing, idx) => (
-                <div
-                  key={idx}
-                  className={`p-2.5 rounded-xl border-2 border-[#2B170C] shadow-[1px_2px_0px_#2B170C] flex flex-col justify-between gap-1.5 ${
-                    ing.isExpiring
-                      ? 'bg-[#FFF9C4] border-[#E53935]'
-                      : ing.inPantry
-                      ? 'bg-[#FFFDF8]'
-                      : 'bg-[#FBE9E7] border-dashed'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <IngredientIcon
-                        name={ing.name}
-                        emoji={ing.emoji}
-                        category={ing.category.toLowerCase() as any}
-                        className="w-8 h-8 text-2xl shrink-0"
-                      />
-                      <div className="overflow-hidden">
-                        <p className="text-xs sm:text-sm font-black text-[#2B170C] truncate leading-tight">
-                          {ing.name}
-                        </p>
-                        <p className="text-xs text-[#2B170C]/80 font-bold truncate">
-                          {ing.amount}
-                        </p>
+            {/* 100% Cookable Banner if 0 missing */}
+            {recipe.ingredients.every(i => i.inPantry) && (
+              <div className="mb-3 p-2.5 bg-[#E8F5E9] border-2 border-[#2E7D32] rounded-xl flex items-center gap-2 text-xs font-black text-[#1B5E20] shadow-[1px_2px_0px_#2B170C]">
+                <CheckCircle2 className="w-4 h-4 text-[#2E7D32] shrink-0" />
+                <span>100% Cookable right now! All ingredients are ready at home.</span>
+              </div>
+            )}
+
+            {/* Group 1: Available from Fridge / Freezer / Pantry */}
+            <div className="mb-3">
+              <p className="text-[11px] font-heading font-black text-[#2E7D32] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                <span>✅</span> From Your Home Inventory ({recipe.ingredients.filter(i => i.inPantry).length})
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {recipe.ingredients
+                  .filter(ing => ing.inPantry)
+                  .map((ing, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2.5 rounded-xl border-2 border-[#2B170C] shadow-[1px_2px_0px_#2B170C] flex flex-col justify-between gap-1.5 ${
+                        ing.isExpiring
+                          ? 'bg-[#FFF9C4] border-[#E53935]'
+                          : 'bg-[#FFFDF8]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <IngredientIcon
+                            name={ing.name}
+                            emoji={ing.emoji}
+                            category={ing.category.toLowerCase() as any}
+                            className="w-8 h-8 text-2xl shrink-0"
+                          />
+                          <div className="overflow-hidden">
+                            <p className="text-xs sm:text-sm font-black text-[#2B170C] truncate leading-tight">
+                              {ing.name}
+                            </p>
+                            <p className="text-xs text-[#2B170C]/80 font-bold truncate">
+                              {ing.amount}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Location Pill */}
+                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 uppercase border ${
+                          ing.location === 'freezer'
+                            ? 'bg-[#E1F5FE] text-[#0277BD] border-[#0288D1]'
+                            : ing.location === 'pantry' || ing.isPantryEssential
+                            ? 'bg-[#FFF8E1] text-[#F57F17] border-[#FBC02D]'
+                            : 'bg-[#E8F5E9] text-[#2E7D32] border-[#2E7D32]'
+                        }`}>
+                          {ing.location === 'freezer' ? '❄️ Freezer' : ing.location === 'pantry' || ing.isPantryEssential ? '🥫 Pantry' : '🧊 Fridge'}
+                        </span>
+                      </div>
+
+                      {/* Expiry Alert or In Stock Confirmation */}
+                      <div className="flex items-center justify-between text-[11px] font-black pt-1 border-t border-[#2B170C]/10">
+                        {ing.isExpiring ? (
+                          <span className="text-[#C62828] flex items-center gap-1 animate-pulse">
+                            ⚠️ Use soon (expiring!)
+                          </span>
+                        ) : (
+                          <span className="text-[#2E7D32] flex items-center gap-1">
+                            ✓ In kitchen
+                          </span>
+                        )}
                       </div>
                     </div>
-
-                    {/* Required vs Optional Tag */}
-                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 uppercase border ${
-                      ing.required
-                        ? 'bg-[#E53935] text-white border-[#2B170C]'
-                        : 'bg-gray-100 text-gray-700 border-gray-300'
-                    }`}>
-                      {ing.required ? 'Req' : 'Opt'}
-                    </span>
-                  </div>
-
-                  {/* Stock Status Pill */}
-                  <div className="flex items-center justify-between text-[11px] font-black pt-1 border-t border-[#2B170C]/10">
-                    {ing.isExpiring ? (
-                      <span className="text-[#C62828] flex items-center gap-1 animate-pulse">
-                        ⚠️ Expiring soon in fridge!
-                      </span>
-                    ) : ing.inPantry ? (
-                      <span className="text-[#2E7D32] flex items-center gap-1">
-                        ✓ In your pantry
-                      </span>
-                    ) : (
-                      <span className="text-[#D84315] flex items-center gap-1">
-                        ✕ Missing {ing.substitution ? `(swap with: ${ing.substitution})` : ''}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                  ))}
+              </div>
             </div>
 
+            {/* Group 2: Need To Buy (Missing items) */}
+            {recipe.ingredients.some(i => !i.inPantry) && (
+              <div className="mt-2">
+                <p className="text-[11px] font-heading font-black text-[#D84315] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                  <span>🛒</span> Need To Buy ({recipe.ingredients.filter(i => !i.inPantry).length})
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {recipe.ingredients
+                    .filter(ing => !ing.inPantry)
+                    .map((ing, idx) => (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded-xl border-2 border-dashed border-[#E53935] bg-[#FBE9E7] shadow-[1px_2px_0px_#2B170C] flex flex-col justify-between gap-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <IngredientIcon
+                              name={ing.name}
+                              emoji={ing.emoji}
+                              category={ing.category.toLowerCase() as any}
+                              className="w-8 h-8 text-2xl shrink-0 opacity-70"
+                            />
+                            <div className="overflow-hidden">
+                              <p className="text-xs sm:text-sm font-black text-[#2B170C] truncate leading-tight">
+                                {ing.name}
+                              </p>
+                              <p className="text-xs text-[#2B170C]/80 font-bold truncate">
+                                {ing.amount}
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 uppercase border ${
+                            ing.required
+                              ? 'bg-[#E53935] text-white border-[#2B170C]'
+                              : 'bg-gray-100 text-gray-700 border-gray-300'
+                          }`}>
+                            {ing.required ? 'Req' : 'Opt'}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] font-bold text-[#D84315] pt-1 border-t border-[#2B170C]/10 leading-tight">
+                          {ing.substitution ? `Swap tip: ${ing.substitution}` : 'Not in your fridge/freezer'}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {/* Substitution Guide */}
-            <p className="mt-2 text-xs sm:text-sm text-[#2B170C] font-semibold bg-[#FFF5EE] p-2.5 rounded-xl border border-[#2B170C]/20">
+            <p className="mt-3 text-xs sm:text-sm text-[#2B170C] font-semibold bg-[#FFF5EE] p-2.5 rounded-xl border border-[#2B170C]/20">
               💡 <b>Substitutions & Swaps:</b> {recipe.substitutions}
             </p>
           </div>

@@ -14,6 +14,7 @@ interface RouletteSpinnerProps {
   onRecipeGenerated: (recipe: DinerRecipe) => void;
   onIncrementSpins: () => void;
   onUnlockChaosBadge: () => void;
+  onCookWithWhatYouHave?: () => void;
 }
 
 // Helper: Pick ingredient with higher weight for expiring-soon items & cuisine affinity
@@ -57,6 +58,7 @@ export const RouletteSpinner: React.FC<RouletteSpinnerProps> = ({
   onRecipeGenerated,
   onIncrementSpins,
   onUnlockChaosBadge,
+  onCookWithWhatYouHave,
 }) => {
   // Separate ingredients by category from the user's active pantry
   // Reel 4 includes Flavor, Dairy, and Spices
@@ -604,6 +606,23 @@ export const RouletteSpinner: React.FC<RouletteSpinnerProps> = ({
         <span>{isSpinning ? 'SPINNING THE GRIDDLE...' : 'PULL & SPIN ROULETTE!'}</span>
         <Sparkles className="w-5 h-5 text-[#FBC02D]" />
       </button>
+
+      {/* Immediate Zero-Waste: Cook With What You Have */}
+      {onCookWithWhatYouHave && (
+        <button
+          type="button"
+          onClick={onCookWithWhatYouHave}
+          disabled={isSpinning || isAiLoading}
+          aria-label="Directly match recipes with available fridge and freezer ingredients"
+          className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-[#FFF9C4] hover:bg-[#FFF59D] border-3 border-[#2B170C] font-retro text-sm sm:text-base text-[#2B170C] tracking-wide uppercase flex items-center justify-center gap-2 shadow-[2px_3px_0px_#2B170C] active:translate-y-0.5 active:shadow-none cursor-pointer transition-all"
+        >
+          <span className="text-xl">🍳</span>
+          <span>COOK WHAT YOU HAVE (RESCUE FOOD)</span>
+          <span className="text-xs font-mono font-bold bg-[#E53935] text-white px-1.5 py-0.5 rounded">
+            {pantry.filter(i => (i.location === 'fridge' || i.location === 'freezer') && i.inFridge).length} FRESH
+          </span>
+        </button>
+      )}
 
       {/* Mini Helper Info */}
       <div className="flex items-center justify-center gap-2 text-xs sm:text-sm text-[#2B170C] font-semibold">

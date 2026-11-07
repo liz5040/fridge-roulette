@@ -1,9 +1,17 @@
 import type { Ingredient } from './ingredients';
 import { getIngredientEmoji } from '../utils/ingredientIcons';
+import { getExpiryInfo } from './ingredients';
 
 export type CuisineType = 'indian' | 'western' | 'fusion';
 export type DietType = 'veg' | 'egg' | 'non-veg';
 export type MealCategory = 'breakfast' | 'melts' | 'speedy' | 'comfort' | 'dinner';
+
+/** Pantry essentials assumed available in any basic home kitchen — do NOT penalize score */
+export const DEFAULT_PANTRY_STAPLES = [
+  'salt', 'black pepper', 'pepper', 'oil', 'cooking oil', 'water',
+  'sugar', 'turmeric', 'cumin', 'mustard seeds', 'mustard',
+  'garam masala', 'flour', 'ghee'
+];
 
 export interface RecipeStep {
   step: number;
@@ -18,8 +26,11 @@ export interface RecipeIngredient {
   emoji: string;
   category: string;
   inPantry: boolean;
+  location?: 'fridge' | 'freezer' | 'pantry';
+  isPantryEssential?: boolean;
   required: boolean;
   isMissing?: boolean;
+  needToBuy?: boolean;
   isExpiring?: boolean;
   substitution?: string;
 }
@@ -45,6 +56,11 @@ export interface DinerRecipe {
   matchScore?: number;
   matchReason?: string;
   isAiGenerated?: boolean;
+  // Perishable inventory matching metrics
+  availablePerishablesCount?: number;
+  missingItemsCount?: number;
+  expiringItemsRescuedCount?: number;
+  is100PercentReady?: boolean;
 }
 
 export interface CuratedRecipeDefinition {
@@ -1498,7 +1514,6 @@ export function matchBestRecipe(
     return true;
   });
 
-  // If filter is too strict, fallback to matching by cuisine only or full pool
   if (candidates.length === 0) {
     candidates = CURATED_RECIPES.filter(r => cuisineFilter === 'all' || r.cuisine === cuisineFilter);
   }
@@ -1517,53 +1532,95 @@ export function matchBestRecipe(
     selected.flavor.id.toLowerCase(),
   ];
 
-  // Map user pantry items for fast keyword & expiry lookups
-  const pantryItemsInStock = pantry.filter(item => item.inFridge);
-  const expiringPantryItemNames = pantryItemsInStock
-    .filter(item => {
-      if (item.expiringSoon) return true;
-      if (!item.expiryDate) return false;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const [y, m, d] = item.expiryDate.split('-').map(Number);
-      const exp = new Date(y, m - 1, d);
-      exp.setHours(0, 0, 0, 0);
-      const diff = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      return diff >= 0 && diff <= 3;
-    })
-    .map(i => i.name.toLowerCase());
+  // Identify inventory sectors
+  const fridgeItemsInStock = pantry.filter(i => (i.location === 'fridge' || !i.location) && i.inFridge);
+  const freezerItemsInStock = pantry.filter(i => i.location === 'freezer' && i.inFridge);
+  const pantryEssentialsInStock = pantry.filter(i => i.location === 'pantry' && i.inFridge);
 
-  // Score candidates
-  let bestScore = -1;
+  const expiringPerishables = [...fridgeItemsInStock, ...freezerItemsInStock].filter(item => {
+    if (item.expiringSoon) return true;
+    if (!item.expiryDate) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [y, m, d] = item.expiryDate.split('-').map(Number);
+    const exp = new Date(y, m - 1, d);
+    exp.setHours(0, 0, 0, 0);
+    const diff = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return diff >= 0 && diff <= 3;
+  });
+
+  let bestScore = -9999;
   let bestRecipeDef = candidates[0];
 
   for (const def of candidates) {
     let score = 0;
+    let missingRequired = 0;
+    let missingOptional = 0;
+    let perishablesUsed = 0;
+    let expiringRescued = 0;
+    let staplesUsed = 0;
 
     for (const req of def.ingredients) {
-      // Check match against spun 4 items
+      const isStaple = DEFAULT_PANTRY_STAPLES.some(st => req.keywords.some(k => k.includes(st) || st.includes(k)));
+
+      // 1. Check match in Fridge (Primary fresh perishables)
+      const matchedFridge = fridgeItemsInStock.find(p =>
+        req.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
+      );
+
+      // 2. Check match in Freezer (Frozen meats, seafood, veggies)
+      const matchedFreezer = freezerItemsInStock.find(p =>
+        req.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
+      );
+
+      // 3. Check match in Pantry Essentials
+      const matchedPantry = pantryEssentialsInStock.find(p =>
+        req.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
+      );
+
+      if (matchedFridge) {
+        perishablesUsed++;
+        score += req.required ? 15 : 8;
+        const isExp = expiringPerishables.some(exp => exp.id === matchedFridge.id);
+        if (isExp) {
+          expiringRescued++;
+          score += 30; // Massive reward for saving food waste!
+        }
+      } else if (matchedFreezer) {
+        perishablesUsed++;
+        score += req.required ? 12 : 6;
+        const isExp = expiringPerishables.some(exp => exp.id === matchedFreezer.id);
+        if (isExp) {
+          expiringRescued++;
+          score += 20;
+        }
+      } else if (matchedPantry || isStaple) {
+        // Pantry essentials do NOT penalize match score
+        staplesUsed++;
+        score += 2;
+      } else {
+        // Fresh ingredient is MISSING (user needs to buy it) -> HEAVY PENALTY
+        if (req.required) {
+          missingRequired++;
+          score -= 25; // Heavily penalize missing fresh requirements
+        } else {
+          missingOptional++;
+          score -= 6;
+        }
+      }
+
+      // Reel synergy bonus (if user spun this item on roulette)
       const matchesSpun = req.keywords.some(k =>
         selectedKeywords.some(sk => sk.includes(k) || k.includes(sk))
       );
       if (matchesSpun) {
-        score += req.required ? 10 : 5;
+        score += 6;
       }
+    }
 
-      // Check match against user's active pantry
-      const inPantry = pantryItemsInStock.some(p =>
-        req.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
-      );
-      if (inPantry) {
-        score += req.required ? 8 : 4;
-      }
-
-      // Priority boost if user has expiring items used in this recipe
-      const isExpiring = expiringPantryItemNames.some(expName =>
-        req.keywords.some(k => expName.includes(k))
-      );
-      if (isExpiring) {
-        score += 15; // Huge bonus for saving expiring food!
-      }
+    // High bonus for recipes that are 100% ready to cook with available ingredients
+    if (missingRequired === 0) {
+      score += 40;
     }
 
     if (score > bestScore) {
@@ -1572,34 +1629,94 @@ export function matchBestRecipe(
     }
   }
 
-  // Build the complete DinerRecipe instance
-  const orderNum = Math.floor(1000 + Math.random() * 9000);
-  const tableNum = Math.floor(1 + Math.random() * 18);
+  return buildRecipeFromDefinition(bestRecipeDef, pantry, bestScore, chaosTwist);
+}
 
-  const enrichedIngredients: RecipeIngredient[] = bestRecipeDef.ingredients.map(ing => {
-    // Check if ingredient is currently in user's pantry
-    const matchedPantryItem = pantry.find(p =>
+/**
+ * Builds a complete DinerRecipe instance from a CuratedRecipeDefinition,
+ * calculating inventory availability, expiring rescues, and match score.
+ */
+export function buildRecipeFromDefinition(
+  def: CuratedRecipeDefinition,
+  pantry: Ingredient[],
+  baseScore?: number,
+  chaosTwist?: string
+): DinerRecipe {
+  const fridgeItemsInStock = pantry.filter(i => (i.location === 'fridge' || !i.location) && i.inFridge);
+  const freezerItemsInStock = pantry.filter(i => i.location === 'freezer' && i.inFridge);
+  const pantryEssentialsInStock = pantry.filter(i => (i.location === 'pantry' || i.isPantryEssential) && i.inFridge);
+
+  const expiringPerishables = pantry.filter(i => {
+    if (!i.inFridge) return false;
+    if (i.location === 'pantry' && !i.expiryDate) return false;
+    const exp = getExpiryInfo(i);
+    return exp.status === 'expiring_soon' || exp.status === 'expired';
+  });
+
+  let perishablesCount = 0;
+  let missingCount = 0;
+  let rescuedCount = 0;
+  let calculatedScore = 0;
+
+  const enrichedIngredients: RecipeIngredient[] = def.ingredients.map(ing => {
+    const isStaple = DEFAULT_PANTRY_STAPLES.some(st => ing.keywords.some(k => k.includes(st) || st.includes(k)));
+
+    const matchedFridge = fridgeItemsInStock.find(p =>
+      ing.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
+    );
+    const matchedFreezer = freezerItemsInStock.find(p =>
+      ing.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
+    );
+    const matchedPantry = pantryEssentialsInStock.find(p =>
       ing.keywords.some(k => p.name.toLowerCase().includes(k) || p.id.toLowerCase().includes(k))
     );
 
-    const inPantry = matchedPantryItem ? matchedPantryItem.inFridge : false;
-    const isMissing = !inPantry;
-
+    let inPantry = false;
+    let location: 'fridge' | 'freezer' | 'pantry' | undefined = undefined;
+    let isPantryEssential = false;
     let isExpiring = false;
-    if (matchedPantryItem && matchedPantryItem.inFridge) {
-      if (matchedPantryItem.expiringSoon) isExpiring = true;
-      if (matchedPantryItem.expiryDate) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const [y, m, d] = matchedPantryItem.expiryDate.split('-').map(Number);
-        const exp = new Date(y, m - 1, d);
-        exp.setHours(0, 0, 0, 0);
-        const diff = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        if (diff >= 0 && diff <= 3) isExpiring = true;
+    let needToBuy = false;
+
+    if (matchedFridge) {
+      inPantry = true;
+      location = 'fridge';
+      perishablesCount++;
+      calculatedScore += ing.required ? 15 : 8;
+      const isExp = expiringPerishables.some(exp => exp.id === matchedFridge.id);
+      if (isExp) {
+        isExpiring = true;
+        rescuedCount++;
+        calculatedScore += 30;
       }
+    } else if (matchedFreezer) {
+      inPantry = true;
+      location = 'freezer';
+      perishablesCount++;
+      calculatedScore += ing.required ? 12 : 6;
+      const isExp = expiringPerishables.some(exp => exp.id === matchedFreezer.id);
+      if (isExp) {
+        isExpiring = true;
+        rescuedCount++;
+        calculatedScore += 20;
+      }
+    } else if (matchedPantry) {
+      inPantry = true;
+      location = 'pantry';
+      isPantryEssential = true;
+      calculatedScore += 2;
+    } else if (isStaple) {
+      inPantry = true;
+      location = 'pantry';
+      isPantryEssential = true;
+      calculatedScore += 2;
+    } else {
+      inPantry = false;
+      needToBuy = true;
+      missingCount++;
+      calculatedScore -= ing.required ? 25 : 6;
     }
 
-    const emoji = getIngredientEmoji(ing.name, matchedPantryItem?.category);
+    const emoji = getIngredientEmoji(ing.name, matchedFridge?.category || matchedFreezer?.category || matchedPantry?.category);
 
     return {
       name: ing.name,
@@ -1607,33 +1724,113 @@ export function matchBestRecipe(
       emoji,
       category: ing.category,
       inPantry,
+      location,
+      isPantryEssential,
       required: ing.required,
-      isMissing,
+      isMissing: needToBuy,
+      needToBuy,
       isExpiring,
-      substitution: ing.substitution || (ing.required ? 'Check substitution tips below' : 'Optional—can omit')
+      substitution: ing.substitution || (needToBuy ? (ing.required ? 'Check substitution tips below' : 'Optional—can omit') : undefined)
     };
   });
 
+  const is100PercentReady = missingCount === 0;
+  if (is100PercentReady) {
+    calculatedScore += 40;
+  }
+
+  const finalScore = baseScore !== undefined ? baseScore : calculatedScore;
+
+  const matchReason = is100PercentReady
+    ? `★ 100% Ready! Uses ${perishablesCount} available perishable items from your Fridge & Freezer${rescuedCount > 0 ? `, rescuing ${rescuedCount} expiring items!` : '.'}`
+    : `Uses ${perishablesCount} items you already have at home (needs only ${missingCount} item${missingCount > 1 ? 's' : ''} to complete).`;
+
+  const orderNum = Math.floor(1000 + Math.random() * 9000);
+  const tableNum = Math.floor(1 + Math.random() * 18);
+
   return {
-    id: `${bestRecipeDef.id}-${Date.now()}`,
-    title: bestRecipeDef.title,
-    tagline: bestRecipeDef.tagline,
+    id: `${def.id}-${Date.now()}`,
+    title: def.title,
+    tagline: def.tagline,
     orderNumber: orderNum,
     tableNumber: tableNum,
-    cookTimeMin: bestRecipeDef.cookTimeMin,
-    difficulty: bestRecipeDef.difficulty,
-    caloriesEst: bestRecipeDef.caloriesEst,
-    cuisine: bestRecipeDef.cuisine,
-    mealStyle: bestRecipeDef.mealStyle,
-    diet: bestRecipeDef.diet,
+    cookTimeMin: def.cookTimeMin,
+    difficulty: def.difficulty,
+    caloriesEst: def.caloriesEst,
+    cuisine: def.cuisine,
+    mealStyle: def.mealStyle,
+    diet: def.diet,
     ingredients: enrichedIngredients,
-    steps: bestRecipeDef.steps,
-    shortOrderTip: bestRecipeDef.shortOrderTip,
-    substitutions: bestRecipeDef.substitutions,
+    steps: def.steps,
+    shortOrderTip: def.shortOrderTip,
+    substitutions: def.substitutions,
     chaosTwist,
-    wasteSavedLbs: bestRecipeDef.wasteSavedLbs,
-    matchScore: bestScore
+    wasteSavedLbs: def.wasteSavedLbs,
+    matchScore: finalScore,
+    matchReason,
+    availablePerishablesCount: perishablesCount,
+    missingItemsCount: missingCount,
+    expiringItemsRescuedCount: rescuedCount,
+    is100PercentReady,
   };
+}
+
+/**
+ * Finds top matching recipes for the user's available Fridge and Freezer stock.
+ * Prioritizes:
+ * 1. 100% Cookable (0 missing fresh ingredients)
+ * 2. Most expiring items rescued
+ * 3. Most perishable ingredients used
+ */
+export function findTopRecipesForInventory(
+  pantry: Ingredient[],
+  options: {
+    cuisineFilter?: 'all' | CuisineType;
+    mealFilter?: 'all' | MealCategory;
+    limit?: number;
+  } = {}
+): DinerRecipe[] {
+  const { cuisineFilter = 'all', mealFilter = 'all', limit = 5 } = options;
+
+  let candidates = CURATED_RECIPES.filter(recipe => {
+    if (cuisineFilter !== 'all' && recipe.cuisine !== cuisineFilter) return false;
+    if (mealFilter !== 'all') {
+      if (mealFilter === 'speedy' && recipe.cookTimeMin > 15) return false;
+      if (mealFilter === 'breakfast' && recipe.mealStyle !== 'breakfast') return false;
+      if (mealFilter === 'melts' && recipe.mealStyle !== 'melts') return false;
+    }
+    return true;
+  });
+
+  if (candidates.length === 0) {
+    candidates = CURATED_RECIPES;
+  }
+
+  // Evaluate every recipe definition against user's actual inventory
+  const evaluated = candidates.map(def => buildRecipeFromDefinition(def, pantry));
+
+  // Deduplicate by recipe title
+  const seen = new Set<string>();
+  const unique = evaluated.filter(r => {
+    if (seen.has(r.title)) return false;
+    seen.add(r.title);
+    return true;
+  });
+
+  // Rank: 100% ready first, then most expiring rescues, then most perishables used, then highest match score
+  unique.sort((a, b) => {
+    if (a.is100PercentReady && !b.is100PercentReady) return -1;
+    if (!a.is100PercentReady && b.is100PercentReady) return 1;
+    if ((b.expiringItemsRescuedCount || 0) !== (a.expiringItemsRescuedCount || 0)) {
+      return (b.expiringItemsRescuedCount || 0) - (a.expiringItemsRescuedCount || 0);
+    }
+    if ((b.availablePerishablesCount || 0) !== (a.availablePerishablesCount || 0)) {
+      return (b.availablePerishablesCount || 0) - (a.availablePerishablesCount || 0);
+    }
+    return (b.matchScore || 0) - (a.matchScore || 0);
+  });
+
+  return unique.slice(0, limit);
 }
 
 /**

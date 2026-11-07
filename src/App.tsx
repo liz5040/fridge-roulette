@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { INITIAL_INGREDIENTS, getDateOffset } from './data/ingredients';
-import type { Ingredient, IngredientCategory, IngredientUnit, PantryPreset } from './data/ingredients';
+import type { Ingredient, IngredientCategory, IngredientUnit, StorageLocation, PantryPreset } from './data/ingredients';
+import { findTopRecipesForInventory } from './data/recipes';
 import type { DinerRecipe } from './data/recipes';
 import { sounds } from './utils/soundEffects';
 import { Header } from './components/Header';
@@ -13,12 +14,31 @@ import { CookMode } from './components/CookMode';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
 
+// Helper: Determine default storage location based on item category or name
+function deduceStorageLocation(id: string, cat: IngredientCategory, name: string): StorageLocation {
+  const pantryIds = ['salt_pepper', 'cooking_oil', 'turmeric_cumin', 'garam_masala', 'ghee_staple', 'basmati_rice', 'macaroni_staple', 'wheat_flour', 'sugar_staple', 'canned_beans', 'soy_sauce'];
+  if (pantryIds.includes(id) || cat === 'spices') return 'pantry';
+
+  const n = (name || '').toLowerCase();
+  if (n.includes('oil') || n.includes('salt') || n.includes('pepper') || n.includes('flour') || n.includes('sugar') || n.includes('rice') || n.includes('pasta') || n.includes('masala')) {
+    return 'pantry';
+  }
+
+  const freezerIds = ['ground_beef', 'fish_fillet', 'frozen_peas', 'frozen_corn', 'waffles'];
+  if (freezerIds.includes(id) || n.includes('frozen') || n.includes('ice cream')) {
+    return 'freezer';
+  }
+
+  return 'fridge';
+}
+
 // Helper: Normalize loaded pantry items from LocalStorage
 function normalizePantry(items: unknown): Ingredient[] {
   if (!Array.isArray(items)) return INITIAL_INGREDIENTS;
 
   const validCategories: IngredientCategory[] = ['protein', 'carb', 'produce', 'flavor', 'dairy', 'spices', 'other'];
   const validUnits: IngredientUnit[] = ['pieces', 'grams', 'kg', 'ml', 'litres'];
+  const validLocations: StorageLocation[] = ['fridge', 'freezer', 'pantry'];
 
   return items.map((item, idx) => {
     let cat: IngredientCategory = validCategories.includes(item.category) ? item.category : 'other';
@@ -28,16 +48,24 @@ function normalizePantry(items: unknown): Ingredient[] {
 
     const unit: IngredientUnit = validUnits.includes(item.unit) ? item.unit : 'pieces';
     const quantity = typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1;
+    const name = item.name || 'Unnamed Ingredient';
+
+    let location: StorageLocation = validLocations.includes(item.location)
+      ? item.location
+      : deduceStorageLocation(item.id || '', cat, name);
 
     let expiryDate = item.expiryDate;
-    if (!expiryDate && item.expiringSoon) {
+    if (!expiryDate && item.expiringSoon && location !== 'pantry') {
       expiryDate = getDateOffset(2);
     }
 
+    const isPantryEssential = item.isPantryEssential ?? (location === 'pantry');
+
     return {
       id: item.id || `item-${Date.now()}-${idx}`,
-      name: item.name || 'Unnamed Ingredient',
+      name,
       category: cat,
+      location,
       emoji: item.emoji || '🍽️',
       quantity,
       unit,
@@ -46,6 +74,7 @@ function normalizePantry(items: unknown): Ingredient[] {
       expiringSoon: item.expiringSoon,
       freshnessDays: item.freshnessDays,
       dinerDesc: item.dinerDesc,
+      isPantryEssential,
     };
   });
 }
@@ -238,10 +267,13 @@ export function App() {
             dinerDesc: presetItem.dinerDesc || existing.dinerDesc,
           };
         } else {
+          const isSpices = presetItem.category === 'spices';
           const newItem: Ingredient = {
             id: presetItem.id,
             name: presetItem.name,
             category: presetItem.category,
+            location: isSpices ? 'pantry' : 'fridge',
+            isPantryEssential: isSpices,
             emoji: presetItem.emoji,
             quantity: presetItem.quantity,
             unit: presetItem.unit,
@@ -255,6 +287,32 @@ export function App() {
 
       return updated;
     });
+  };
+
+  // Move an ingredient between Fridge, Freezer, and Pantry
+  const handleMoveIngredient = (id: string, newLocation: StorageLocation) => {
+    sounds.playBoop(480);
+    setPantry(prev =>
+      prev.map(item => {
+        if (item.id !== id) return item;
+        return {
+          ...item,
+          location: newLocation,
+          isPantryEssential: newLocation === 'pantry',
+        };
+      })
+    );
+  };
+
+  // Cook With What You Have: finds top recipe matching current fridge & freezer inventory
+  const handleCookWithWhatYouHave = () => {
+    sounds.playDinerBell();
+    const matches = findTopRecipesForInventory(pantry, { limit: 1 });
+    if (matches.length > 0) {
+      setActiveRecipe(matches[0]);
+      setIsFloatingTicketDismissed(false);
+      setIsRecipeModalOpen(true);
+    }
   };
 
   const handleToggleSaveFavorite = (recipe: DinerRecipe) => {
@@ -324,6 +382,7 @@ export function App() {
               onRecipeGenerated={handleRecipeGenerated}
               onIncrementSpins={handleIncrementSpins}
               onUnlockChaosBadge={handleUnlockChaosBadge}
+              onCookWithWhatYouHave={handleCookWithWhatYouHave}
             />
           )}
 
@@ -335,6 +394,8 @@ export function App() {
               onApplyPreset={handleApplyPreset}
               onAddOrUpdateIngredient={handleAddOrUpdateIngredient}
               onDeleteIngredient={handleDeleteIngredient}
+              onMoveIngredient={handleMoveIngredient}
+              onCookWithWhatYouHave={handleCookWithWhatYouHave}
             />
           )}
 

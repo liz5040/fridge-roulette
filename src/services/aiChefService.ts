@@ -135,3 +135,4 @@ function createVerifiedFallbackRecipe(
   recipe.isAiGenerated = false;
   return recipe;
 }
+

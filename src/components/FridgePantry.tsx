@@ -13,11 +13,13 @@ import {
   Layers,
   ChefHat,
   Info,
+  ArrowRightLeft,
 } from 'lucide-react';
 import {
   PANTRY_PRESETS,
   CATEGORY_LABELS,
   UNIT_LABELS,
+  LOCATION_LABELS,
   getExpiryInfo,
   getDateOffset,
 } from '../data/ingredients';
@@ -25,6 +27,7 @@ import type {
   Ingredient,
   IngredientCategory,
   IngredientUnit,
+  StorageLocation,
   PantryPreset,
 } from '../data/ingredients';
 import { sounds } from '../utils/soundEffects';
@@ -37,6 +40,8 @@ interface FridgePantryProps {
   onApplyPreset: (preset: PantryPreset) => void;
   onAddOrUpdateIngredient: (item: Omit<Ingredient, 'id'>, existingId?: string) => { updated: boolean; name: string };
   onDeleteIngredient: (id: string) => void;
+  onMoveIngredient?: (id: string, newLocation: StorageLocation) => void;
+  onCookWithWhatYouHave?: () => void;
   notificationMessage?: string | null;
   onClearNotification?: () => void;
 }
@@ -55,14 +60,18 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
   onApplyPreset,
   onAddOrUpdateIngredient,
   onDeleteIngredient,
+  onMoveIngredient,
+  onCookWithWhatYouHave,
 }) => {
+  // Main Storage Sector Filter: 'fridge' | 'freezer' | 'pantry' | 'all'
+  const [selectedLocation, setSelectedLocation] = useState<'all' | StorageLocation>('fridge');
   // Category Filter
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   // Stock Status Filter ('all' | 'in_fridge' | 'expiring' | 'expired')
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_fridge' | 'expiring' | 'expired'>('all');
   // Search query
   const [searchQuery, setSearchQuery] = useState('');
-  // Collapsible Quick Presets state (collapsed by default to give inventory priority!)
+  // Collapsible Quick Presets state
   const [showPresets, setShowPresets] = useState(false);
 
   // Local Toast Notification
@@ -75,6 +84,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
   // Form Fields
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState<IngredientCategory>('protein');
+  const [formLocation, setFormLocation] = useState<StorageLocation>('fridge');
   const [formQuantity, setFormQuantity] = useState<string>('1');
   const [formUnit, setFormUnit] = useState<IngredientUnit>('pieces');
   const [formEmoji, setFormEmoji] = useState('🥓');
@@ -94,11 +104,12 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
   };
 
   // Open Add Modal
-  const handleOpenAddModal = (presetCategory?: IngredientCategory) => {
+  const handleOpenAddModal = (presetCategory?: IngredientCategory, defaultLocation?: StorageLocation) => {
     sounds.playBoop(550);
     setEditingItem(null);
     setFormName('');
     setFormCategory(presetCategory || 'protein');
+    setFormLocation(defaultLocation || (selectedLocation === 'all' ? 'fridge' : selectedLocation));
     setFormQuantity('1');
     setFormUnit(presetCategory === 'produce' || presetCategory === 'dairy' ? 'grams' : 'pieces');
     setFormEmoji(presetCategory ? CATEGORY_LABELS[presetCategory]?.emoji || '🍽️' : '🥓');
@@ -114,6 +125,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
     setEditingItem(item);
     setFormName(item.name);
     setFormCategory(item.category);
+    setFormLocation(item.location || 'fridge');
     setFormQuantity(String(item.quantity || 1));
     setFormUnit(item.unit || 'pieces');
     setFormEmoji(item.emoji || '🍽️');
@@ -145,13 +157,14 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
     const payload: Omit<Ingredient, 'id'> = {
       name: trimmed,
       category: formCategory,
-      // Auto-detect icon: use registry first, then user-chosen formEmoji
+      location: formLocation,
+      isPantryEssential: formLocation === 'pantry',
       emoji: resolveIngredientIcon(trimmed, formCategory).emoji || formEmoji,
       quantity: Number(qtyNum.toFixed(2)),
       unit: formUnit,
       inFridge: formInFridge,
       expiryDate: formExpiryDate.trim() ? formExpiryDate.trim() : undefined,
-      dinerDesc: editingItem?.dinerDesc || 'Custom diner pantry essential',
+      dinerDesc: editingItem?.dinerDesc || `${LOCATION_LABELS[formLocation].label} stock item`,
     };
 
     const result = onAddOrUpdateIngredient(payload, editingItem ? editingItem.id : undefined);
@@ -159,21 +172,30 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
     setIsModalOpen(false);
 
     if (editingItem) {
-      triggerToast(`★ Updated "${payload.name}" in pantry!`);
+      triggerToast(`★ Updated "${payload.name}" in ${LOCATION_LABELS[formLocation].label}!`);
     } else if (result.updated) {
       triggerToast(`★ Updated existing "${result.name}" quantity to ${payload.quantity} ${payload.unit}!`);
     } else {
-      triggerToast(`★ Added "${payload.name}" (${payload.quantity} ${payload.unit}) to your fridge!`);
+      triggerToast(`★ Added "${payload.name}" to ${LOCATION_LABELS[formLocation].label}!`);
     }
   };
 
-  // Delete Action
+  // Confirm delete
   const handleConfirmDelete = () => {
     if (!deletingItem) return;
     sounds.playBoop(400);
     onDeleteIngredient(deletingItem.id);
-    triggerToast(`★ Removed "${deletingItem.name}" from diner pantry.`);
+    triggerToast(`★ Removed "${deletingItem.name}" from pantry.`);
     setDeletingItem(null);
+  };
+
+  // Move item location
+  const handleQuickMove = (item: Ingredient, targetLocation: StorageLocation) => {
+    if (item.location === targetLocation) return;
+    if (onMoveIngredient) {
+      onMoveIngredient(item.id, targetLocation);
+      triggerToast(`★ Moved "${item.name}" to ${LOCATION_LABELS[targetLocation].label}!`);
+    }
   };
 
   // Quick Preset Click
@@ -183,14 +205,23 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
     triggerToast(`★ Order Up! Restocked ${preset.items.length} staples from "${preset.name}"!`);
   };
 
-  // Filter Logic
+  // Filter Logic:
+  // 1. Storage Location Filter
+  // 2. Category Filter
+  // 3. Status Filter
+  // 4. Search Query
   const filteredItems = pantry.filter(item => {
-    // 1. Category Filter
+    // 1. Location Filter
+    if (selectedLocation !== 'all' && item.location !== selectedLocation) {
+      return false;
+    }
+
+    // 2. Category Filter
     if (selectedCategory !== 'all' && item.category !== selectedCategory) {
       return false;
     }
 
-    // 2. Status Filter
+    // 3. Status Filter
     const expiry = getExpiryInfo(item);
     if (statusFilter === 'in_fridge' && !item.inFridge) {
       return false;
@@ -202,7 +233,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       return false;
     }
 
-    // 3. Search Filter
+    // 4. Search Filter
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       const matchName = item.name.toLowerCase().includes(q);
@@ -214,17 +245,29 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
     return true;
   });
 
-  // Calculate counts for badges
-  const totalInFridge = pantry.filter(i => i.inFridge).length;
-  const expiringCount = pantry.filter(i => i.inFridge && getExpiryInfo(i).status === 'expiring_soon').length;
-  const expiredCount = pantry.filter(i => i.inFridge && getExpiryInfo(i).status === 'expired').length;
+  // Calculate counts for headers and badges
+  const fridgeItemsCount = pantry.filter(i => i.location === 'fridge').length;
+  const freezerItemsCount = pantry.filter(i => i.location === 'freezer').length;
+  const pantryItemsCount = pantry.filter(i => i.location === 'pantry').length;
+
+  const perishablesInStockCount = pantry.filter(
+    i => (i.location === 'fridge' || i.location === 'freezer') && i.inFridge
+  ).length;
+
+  const expiringCount = pantry.filter(
+    i => i.inFridge && (i.location === 'fridge' || i.location === 'freezer') && getExpiryInfo(i).status === 'expiring_soon'
+  ).length;
+
+  const expiredCount = pantry.filter(
+    i => i.inFridge && getExpiryInfo(i).status === 'expired'
+  ).length;
 
   const categoriesList: { id: string; label: string; emoji: string }[] = [
     { id: 'all', label: 'All Items', emoji: '🧺' },
-    { id: 'protein', label: 'Protein', emoji: '🥓' },
-    { id: 'carb', label: 'Carbs', emoji: '🍞' },
     { id: 'produce', label: 'Produce', emoji: '🍅' },
+    { id: 'protein', label: 'Protein', emoji: '🥓' },
     { id: 'dairy', label: 'Dairy', emoji: '🧀' },
+    { id: 'carb', label: 'Carbs', emoji: '🍞' },
     { id: 'spices', label: 'Spices', emoji: '🧂' },
     { id: 'flavor', label: 'Flavor', emoji: '🥣' },
     { id: 'other', label: 'Other', emoji: '🥫' },
@@ -258,28 +301,175 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 1. TOP PANTRY HEADER CARD WITH BALANCED ALIGNMENT & COLLAPSIBLE PRESETS   */}
+      {/* 1. HERO BANNER: COOK WITH WHAT YOU HAVE                                   */}
       {/* ========================================================================= */}
-      <div className="bg-[#FFFDF8] border-3 border-[#2B170C] rounded-2xl p-3 sm:p-3.5 shadow-[4px_4px_0px_#2B170C] flex flex-col gap-2.5">
-        {/* Main Heading Row — Aligned with Add Item Button */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#FBC02D] border-3 border-[#2B170C] flex items-center justify-center text-2xl shadow-[2px_2px_0px_#2B170C] shrink-0">
-              🧊
+      {onCookWithWhatYouHave && (
+        <div className="bg-[#FFF9C4] border-3 border-[#2B170C] rounded-2xl p-3 shadow-[4px_4px_0px_#2B170C] flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-[#E53935] text-white border-2 border-[#2B170C] flex items-center justify-center text-xl shadow-[1px_1px_0px_#2B170C] shrink-0">
+              🍳
             </div>
             <div>
-              <h2 className="font-retro text-xl sm:text-2xl text-[#E53935] tracking-wide leading-tight">
-                DINER PANTRY
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-heading font-black text-xs sm:text-sm text-[#2B170C] uppercase tracking-wide">
+                  Cook What You Have
+                </h3>
+                {expiringCount > 0 && (
+                  <span className="text-[10px] bg-[#E53935] text-white font-mono font-black px-1.5 py-0.2 rounded-full animate-pulse">
+                    {expiringCount} RESCUE
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-[#2B170C]/80 font-bold">
+                {perishablesInStockCount} fresh & frozen perishables in stock
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onCookWithWhatYouHave}
+            className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#E53935] text-white border-2 border-[#2B170C] font-retro text-xs uppercase tracking-wider shadow-[2px_2px_0px_#2B170C] active:translate-y-0.5 cursor-pointer hover:bg-[#FF5252] flex items-center gap-1.5 shrink-0"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#FBC02D]" />
+            <span>Match Meals</span>
+          </button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. PRIMARY STORAGE SECTOR TABS: FRIDGE, FREEZER, PANTRY ESSENTIALS        */}
+      {/* ========================================================================= */}
+      <div className="bg-[#FFFDF8] border-3 border-[#2B170C] rounded-2xl p-2 sm:p-2.5 shadow-[4px_4px_0px_#2B170C] flex flex-col gap-2">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] font-heading font-black text-[#2B170C]/80 uppercase tracking-wider">
+            Inventory Storage Location
+          </span>
+          <span className="text-[11px] font-bold text-[#E53935]">
+            {selectedLocation === 'pantry' ? 'Staples on hand' : 'Perishables tracked'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 gap-1.5" role="tablist" aria-label="Inventory Storage Sectors">
+          {/* Fridge Tab */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedLocation === 'fridge'}
+            onClick={() => {
+              sounds.playBoop(520);
+              setSelectedLocation('fridge');
+            }}
+            className={`py-2 px-1 rounded-xl border-2 flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+              selectedLocation === 'fridge'
+                ? 'bg-[#E53935] text-white border-[#2B170C] shadow-[2px_2px_0px_#2B170C]'
+                : 'bg-[#FBF5E6] text-[#2B170C] border-[#2B170C]/30 hover:border-[#2B170C]'
+            }`}
+          >
+            <span className="text-xl">🧊</span>
+            <span className="text-xs font-black truncate">Fridge</span>
+            <span className={`text-[10px] font-black px-1.5 rounded-full ${selectedLocation === 'fridge' ? 'bg-white/30 text-white' : 'bg-[#2B170C]/10 text-[#2B170C]'}`}>
+              {fridgeItemsCount}
+            </span>
+          </button>
+
+          {/* Freezer Tab */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedLocation === 'freezer'}
+            onClick={() => {
+              sounds.playBoop(520);
+              setSelectedLocation('freezer');
+            }}
+            className={`py-2 px-1 rounded-xl border-2 flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+              selectedLocation === 'freezer'
+                ? 'bg-[#0288D1] text-white border-[#2B170C] shadow-[2px_2px_0px_#2B170C]'
+                : 'bg-[#FBF5E6] text-[#2B170C] border-[#2B170C]/30 hover:border-[#2B170C]'
+            }`}
+          >
+            <span className="text-xl">❄️</span>
+            <span className="text-xs font-black truncate">Freezer</span>
+            <span className={`text-[10px] font-black px-1.5 rounded-full ${selectedLocation === 'freezer' ? 'bg-white/30 text-white' : 'bg-[#2B170C]/10 text-[#2B170C]'}`}>
+              {freezerItemsCount}
+            </span>
+          </button>
+
+          {/* Pantry Essentials Tab */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedLocation === 'pantry'}
+            onClick={() => {
+              sounds.playBoop(520);
+              setSelectedLocation('pantry');
+            }}
+            className={`py-2 px-1 rounded-xl border-2 flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+              selectedLocation === 'pantry'
+                ? 'bg-[#FBC02D] text-[#2B170C] border-[#2B170C] shadow-[2px_2px_0px_#2B170C]'
+                : 'bg-[#FBF5E6] text-[#2B170C] border-[#2B170C]/30 hover:border-[#2B170C]'
+            }`}
+          >
+            <span className="text-xl">🥫</span>
+            <span className="text-xs font-black truncate">Pantry</span>
+            <span className={`text-[10px] font-black px-1.5 rounded-full ${selectedLocation === 'pantry' ? 'bg-[#2B170C] text-[#FFF9C4]' : 'bg-[#2B170C]/10 text-[#2B170C]'}`}>
+              {pantryItemsCount}
+            </span>
+          </button>
+
+          {/* All Items Tab */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedLocation === 'all'}
+            onClick={() => {
+              sounds.playBoop(520);
+              setSelectedLocation('all');
+            }}
+            className={`py-2 px-1 rounded-xl border-2 flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+              selectedLocation === 'all'
+                ? 'bg-[#2B170C] text-[#FFFDF8] border-[#2B170C] shadow-[2px_2px_0px_#2B170C]'
+                : 'bg-[#FBF5E6] text-[#2B170C] border-[#2B170C]/30 hover:border-[#2B170C]'
+            }`}
+          >
+            <span className="text-xl">🧺</span>
+            <span className="text-xs font-black truncate">All</span>
+            <span className={`text-[10px] font-black px-1.5 rounded-full ${selectedLocation === 'all' ? 'bg-[#FFF9C4] text-[#2B170C]' : 'bg-[#2B170C]/10 text-[#2B170C]'}`}>
+              {pantry.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Short location info note */}
+        <p className="text-[11px] text-[#2B170C]/80 font-semibold px-1">
+          {selectedLocation === 'all'
+            ? 'Showing complete kitchen inventory across all storage.'
+            : LOCATION_LABELS[selectedLocation].shortDesc}
+        </p>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 3. ADD ITEM & COLLAPSIBLE PRESETS                                         */}
+      {/* ========================================================================= */}
+      <div className="bg-[#FFFDF8] border-3 border-[#2B170C] rounded-2xl p-3 sm:p-3.5 shadow-[4px_4px_0px_#2B170C] flex flex-col gap-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-[#FBC02D] border-2 border-[#2B170C] flex items-center justify-center text-xl shadow-[1px_1px_0px_#2B170C] shrink-0">
+              {selectedLocation === 'freezer' ? '❄️' : selectedLocation === 'pantry' ? '🥫' : '🧊'}
+            </div>
+            <div>
+              <h2 className="font-retro text-lg sm:text-xl text-[#E53935] tracking-wide leading-tight">
+                {selectedLocation === 'all' ? 'KITCHEN STOCK' : LOCATION_LABELS[selectedLocation].title}
               </h2>
-              <p className="text-xs sm:text-sm text-[#2B170C] font-semibold mt-0.5">
-                Stock, quantities & freshness
+              <p className="text-xs text-[#2B170C] font-semibold">
+                {filteredItems.length} items in current view
               </p>
             </div>
           </div>
 
           <button
             onClick={() => handleOpenAddModal()}
-            className="min-h-[44px] px-3.5 sm:px-4 py-2 rounded-xl bg-[#E53935] text-white border-2 border-[#2B170C] text-xs sm:text-sm font-retro uppercase tracking-wider shadow-[2px_2px_0px_#2B170C] active:translate-y-0.5 active:shadow-none flex items-center gap-1.5 cursor-pointer hover:bg-[#FF5252] transition-colors shrink-0"
+            className="min-h-[42px] px-3.5 sm:px-4 py-2 rounded-xl bg-[#E53935] text-white border-2 border-[#2B170C] text-xs sm:text-sm font-retro uppercase tracking-wider shadow-[2px_2px_0px_#2B170C] active:translate-y-0.5 active:shadow-none flex items-center gap-1.5 cursor-pointer hover:bg-[#FF5252] transition-colors shrink-0"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
             <span>Add Item</span>
@@ -334,20 +524,19 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. UNIFIED SEARCH & STOCK STATUS FILTERS SECTION                         */}
+      {/* 4. SEARCH & STATUS FILTERS SECTION                                        */}
       {/* ========================================================================= */}
       <div className="bg-[#FFFDF8] border-3 border-[#2B170C] rounded-2xl p-2.5 sm:p-3 shadow-[3px_3px_0px_#2B170C] flex flex-col gap-2">
-        {/* Search Bar Input */}
         <div className="relative flex items-center">
           <Search className="w-4 h-4 text-gray-500 absolute left-3 pointer-events-none" />
           <input
             id="pantry-search"
             type="text"
-            placeholder="Search by ingredient name or note..."
+            placeholder="Search ingredient by name or note..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-9 py-2 rounded-xl border-2 border-[#2B170C] bg-[#FBF5E6] text-xs sm:text-sm font-bold text-[#2B170C] placeholder:text-gray-500 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#E53935] min-h-[40px]"
-            aria-label="Search pantry ingredients"
+            aria-label="Search ingredients"
           />
           {searchQuery && (
             <button
@@ -360,7 +549,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
           )}
         </div>
 
-        {/* Stock Status Filter Pills */}
+        {/* Stock Status Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs font-black pt-1 border-t border-[#2B170C]/15" role="tablist" aria-label="Stock status filters">
           <button
             onClick={() => {
@@ -374,7 +563,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 : 'bg-[#FFFDF8] text-[#2B170C] border-[#2B170C]/35 hover:border-[#2B170C]'
             }`}
           >
-            All ({pantry.length})
+            All In View ({filteredItems.length})
           </button>
 
           <button
@@ -389,8 +578,8 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 : 'bg-[#FFFDF8] text-[#2E7D32] border-[#2B170C]/35 hover:border-[#2B170C]'
             }`}
           >
-            <span>In Fridge</span>
-            <span className="px-1 rounded bg-black/10 text-[11px] font-black">{totalInFridge}</span>
+            <span>In Stock</span>
+            <span className="px-1 rounded bg-black/10 text-[11px] font-black">{perishablesInStockCount}</span>
           </button>
 
           <button
@@ -432,13 +621,13 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. SEPARATE HORIZONTALLY SCROLLABLE INGREDIENT CATEGORY CHIPS ROW         */}
+      {/* 5. CATEGORY CHIPS ROW                                                     */}
       {/* ========================================================================= */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs sm:text-sm" role="tablist" aria-label="Category tabs">
         {categoriesList.map(c => {
           const count = c.id === 'all'
-            ? pantry.length
-            : pantry.filter(i => i.category === c.id).length;
+            ? pantry.filter(i => selectedLocation === 'all' || i.location === selectedLocation).length
+            : pantry.filter(i => i.category === c.id && (selectedLocation === 'all' || i.location === selectedLocation)).length;
 
           return (
             <button
@@ -449,7 +638,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 sounds.playBoop(500);
                 setSelectedCategory(c.id);
               }}
-              className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black border-2 transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              className={`min-h-[38px] px-3 py-1 rounded-xl text-xs sm:text-sm font-black border-2 transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
                 selectedCategory === c.id
                   ? 'bg-[#E53935] text-white border-[#2B170C] shadow-[2px_2px_0px_#2B170C]'
                   : 'bg-[#FFFDF8] text-[#2B170C] border-[#2B170C]/35 hover:border-[#2B170C]'
@@ -470,44 +659,23 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. INVENTORY VISUAL PRIORITY SUBHEADER                                    */}
-      {/* ========================================================================= */}
-      <div className="flex items-center justify-between px-1 text-xs sm:text-sm font-black text-[#2B170C] pt-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-base" aria-hidden="true">🛒</span>
-          <span className="font-heading font-black tracking-wide uppercase">
-            {selectedCategory === 'all' ? 'All Pantry Items' : CATEGORY_LABELS[selectedCategory as IngredientCategory]?.label || selectedCategory}
-          </span>
-          <span className="text-xs bg-[#2B170C] text-[#FFF9C4] px-2 py-0.5 rounded-full font-mono font-black">
-            {filteredItems.length}
-          </span>
-        </div>
-
-        {filteredItems.length > 0 && (
-          <span className="text-[11px] text-[#2B170C]/75 font-bold hidden sm:inline">
-            Tap checkbox to toggle fridge stock
-          </span>
-        )}
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 5. BALANCED INGREDIENT CARDS WITH UNIFORM DIMENSIONS & ALIGNMENT          */}
+      {/* 6. INGREDIENT CARDS WITH LOCATION BADGE & 1-TAP MOVE BUTTONS              */}
       {/* ========================================================================= */}
       {filteredItems.length === 0 ? (
         <div className="bg-[#FFFDF8] border-3 border-dashed border-[#2B170C] rounded-2xl p-6 text-center shadow-[4px_4px_0px_#2B170C] flex flex-col items-center gap-3">
           <div className="w-16 h-16 rounded-full bg-[#FFF9C4] border-2 border-[#2B170C] flex items-center justify-center text-4xl shadow-[2px_2px_0px_#2B170C]">
-            🍽️
+            {selectedLocation === 'freezer' ? '❄️' : selectedLocation === 'pantry' ? '🥫' : '🧊'}
           </div>
           <div>
             <h3 className="font-retro text-lg text-[#E53935]">
-              PANTRY SHELF IS EMPTY!
+              {selectedLocation === 'all' ? 'PANTRY SHELF IS EMPTY!' : `${LOCATION_LABELS[selectedLocation].title} IS EMPTY!`}
             </h3>
             <p className="text-xs sm:text-sm text-[#2B170C] font-semibold max-w-xs mt-1">
               {searchQuery
                 ? `No ingredients matched "${searchQuery}". Clear your search or add a new item.`
                 : statusFilter !== 'all'
                 ? `No items match the "${statusFilter.replace('_', ' ')}" filter right now.`
-                : `No items in ${selectedCategory === 'all' ? 'the pantry' : selectedCategory} yet.`}
+                : `No items in ${selectedLocation === 'all' ? 'inventory' : LOCATION_LABELS[selectedLocation].label} yet.`}
             </p>
           </div>
 
@@ -530,7 +698,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           {filteredItems.map(item => {
             const expiry = getExpiryInfo(item);
             const unitLabel = UNIT_LABELS[item.unit]?.short || item.unit;
@@ -538,82 +706,104 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
             return (
               <div
                 key={item.id}
-                className={`p-3 rounded-2xl border-3 border-[#2B170C] transition-all flex flex-col justify-between h-[162px] relative shadow-[2px_3px_0px_#2B170C] ${
+                className={`p-3 rounded-2xl border-3 border-[#2B170C] transition-all flex flex-col justify-between min-h-[160px] relative shadow-[2px_3px_0px_#2B170C] ${
                   item.inFridge
                     ? 'bg-[#FFFDF8]'
                     : 'bg-[#ECEFF1] opacity-75 border-dashed'
                 } ${expiry.status === 'expired' ? 'ring-2 ring-red-600' : ''}`}
               >
-                {/* Top Row: Ingredient Icon on left, actions on right with uniform alignment */}
-                <div className="flex items-start justify-between gap-1">
-                  <IngredientIcon
-                    name={item.name}
-                    emoji={item.emoji}
-                    category={item.category}
-                    className="w-10 h-10 text-3xl sm:text-4xl filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)] shrink-0"
-                  />
+                {/* Top Row: Icon, Name, and Top Actions */}
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <IngredientIcon
+                      name={item.name}
+                      emoji={item.emoji}
+                      category={item.category}
+                      className="w-9 h-9 text-3xl filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.1)] shrink-0"
+                    />
+                    <div className="overflow-hidden">
+                      <p className="text-sm font-heading font-black text-[#2B170C] leading-tight truncate">
+                        {item.name}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[11px] font-mono font-black bg-[#FBF5E6] text-[#2B170C] px-1.5 py-0.2 rounded border border-[#2B170C]/30">
+                          {item.quantity} {unitLabel}
+                        </span>
+                        <span className="text-[10px] font-black text-[#2B170C]/70 uppercase">
+                          {item.category}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
+                  {/* Top Right Controls */}
                   <div className="flex items-center gap-1 shrink-0">
-                    {/* Edit Button */}
                     <button
                       onClick={() => handleOpenEditModal(item)}
                       title={`Edit ${item.name}`}
                       aria-label={`Edit ${item.name}`}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 border-[#2B170C] bg-[#FFF9C4] text-[#2B170C] flex items-center justify-center hover:bg-[#FDD835] transition-colors cursor-pointer shadow-[1px_1px_0px_#2B170C] active:translate-y-0.5"
+                      className="w-7 h-7 rounded-lg border-2 border-[#2B170C] bg-[#FFF9C4] text-[#2B170C] flex items-center justify-center hover:bg-[#FDD835] transition-colors cursor-pointer shadow-[1px_1px_0px_#2B170C]"
                     >
-                      <Pencil className="w-3.5 h-3.5" />
+                      <Pencil className="w-3 h-3" />
                     </button>
 
-                    {/* Delete Button */}
                     <button
                       onClick={() => setDeletingItem(item)}
                       title={`Delete ${item.name}`}
                       aria-label={`Delete ${item.name}`}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 border-[#2B170C] bg-[#FFE3E3] text-[#B71C1C] flex items-center justify-center hover:bg-[#FFCDD2] transition-colors cursor-pointer shadow-[1px_1px_0px_#2B170C] active:translate-y-0.5"
+                      className="w-7 h-7 rounded-lg border-2 border-[#2B170C] bg-[#FFE3E3] text-[#B71C1C] flex items-center justify-center hover:bg-[#FFCDD2] transition-colors cursor-pointer shadow-[1px_1px_0px_#2B170C]"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
 
-                    {/* Stock Status Toggle Checkbox */}
                     <button
                       onClick={() => {
                         sounds.playBoop(item.inFridge ? 450 : 650);
                         onToggleInFridge(item.id);
                       }}
-                      title={item.inFridge ? `Mark ${item.name} Out of Stock` : `Mark ${item.name} In Fridge`}
-                      aria-label={item.inFridge ? `Mark ${item.name} out of stock` : `Mark ${item.name} in fridge`}
-                      aria-pressed={item.inFridge}
-                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 border-[#2B170C] flex items-center justify-center transition-transform active:scale-90 cursor-pointer ${
+                      title={item.inFridge ? `Mark Out of Stock` : `Mark In Stock`}
+                      aria-label={item.inFridge ? `Mark ${item.name} out of stock` : `Mark ${item.name} in stock`}
+                      className={`w-7 h-7 rounded-lg border-2 border-[#2B170C] flex items-center justify-center transition-transform active:scale-90 cursor-pointer ${
                         item.inFridge
                           ? 'bg-[#2E7D32] text-white shadow-[1px_1px_0px_#2B170C]'
                           : 'bg-[#FFFDF8] text-gray-400'
                       }`}
                     >
-                      {item.inFridge && <Check className="w-4 h-4 stroke-[3]" />}
+                      {item.inFridge && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Middle Row: Name, Quantity & Category with fixed bounds */}
-                <div className="my-auto overflow-hidden">
-                  <p className="text-sm sm:text-base font-heading font-black text-[#2B170C] leading-snug line-clamp-1">
-                    {item.name}
-                  </p>
-
-                  <div className="flex items-center gap-1.5 mt-1">
-                    {/* Quantity & Unit Pill */}
-                    <span className="text-xs font-mono font-black bg-[#FBF5E6] text-[#2B170C] px-2 py-0.5 rounded border border-[#2B170C]/35">
-                      {item.quantity} {unitLabel}
-                    </span>
-
-                    {/* Category Pill */}
-                    <span className="text-xs font-black text-[#2B170C]/75 uppercase truncate">
-                      {item.category}
-                    </span>
+                {/* 1-Tap Location Switcher Pill */}
+                <div className="my-2 p-1 bg-[#FBF5E6] rounded-xl border border-[#2B170C]/25 flex items-center justify-between gap-1 text-[11px] font-black">
+                  <span className="text-[10px] text-[#2B170C]/75 uppercase px-1 font-bold flex items-center gap-1">
+                    <ArrowRightLeft className="w-2.5 h-2.5" />
+                    <span>Store:</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(['fridge', 'freezer', 'pantry'] as StorageLocation[]).map(loc => {
+                      const isActive = item.location === loc;
+                      return (
+                        <button
+                          key={loc}
+                          type="button"
+                          onClick={() => handleQuickMove(item, loc)}
+                          title={`Move to ${LOCATION_LABELS[loc].label}`}
+                          className={`px-1.5 py-0.5 rounded-lg border text-[10px] font-black transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-[#2B170C] text-[#FFF9C4] border-[#2B170C] shadow-[1px_1px_0px_#2B170C]'
+                              : 'bg-white text-[#2B170C] border-gray-300 hover:border-[#2B170C]'
+                          }`}
+                        >
+                          <span>{LOCATION_LABELS[loc].emoji}</span>
+                          <span className="ml-0.5 capitalize">{loc}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Bottom Row: Expiry Badge pinned cleanly to bottom */}
+                {/* Bottom Row: Expiry Badge or Pantry Staple Note */}
                 <div className="pt-1.5 border-t border-[#2B170C]/15 flex items-center justify-between mt-auto">
                   <span className={`text-xs font-black px-2 py-0.5 rounded border flex items-center gap-1 truncate ${expiry.badgeClass}`}>
                     {expiry.status === 'expired' ? (
@@ -626,7 +816,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
 
                   {!item.inFridge && (
                     <span className="text-[10px] font-black text-gray-600 uppercase shrink-0">
-                      Out
+                      Out of stock
                     </span>
                   )}
                 </div>
@@ -674,6 +864,35 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 </div>
               )}
 
+              {/* Storage Location Selector */}
+              <div>
+                <label className="block text-xs sm:text-sm font-heading font-black text-[#2B170C] uppercase tracking-wider mb-1">
+                  Storage Location *
+                </label>
+                <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Storage Location">
+                  {(['fridge', 'freezer', 'pantry'] as StorageLocation[]).map(loc => (
+                    <button
+                      key={loc}
+                      type="button"
+                      role="radio"
+                      aria-checked={formLocation === loc}
+                      onClick={() => setFormLocation(loc)}
+                      className={`min-h-[42px] py-1.5 px-1 rounded-xl border-2 border-[#2B170C] text-xs font-black capitalize flex items-center justify-center gap-1 cursor-pointer ${
+                        formLocation === loc
+                          ? 'bg-[#E53935] text-white shadow-[1px_1px_0px_#2B170C]'
+                          : 'bg-[#FFFDF8] text-[#2B170C] hover:bg-[#FFF9C4]'
+                      }`}
+                    >
+                      <span>{LOCATION_LABELS[loc].emoji}</span>
+                      <span className="truncate">{loc}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-gray-700 font-medium mt-1 block">
+                  {formLocation === 'pantry' ? 'Staples (oils, salt, spices) do not penalize recipes.' : 'Perishables tracked for expiry and prioritized in meals.'}
+                </span>
+              </div>
+
               {/* Ingredient Name */}
               <div>
                 <label htmlFor="ingredient-name" className="block text-xs sm:text-sm font-heading font-black text-[#2B170C] uppercase tracking-wider mb-1">
@@ -682,7 +901,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 <input
                   id="ingredient-name"
                   type="text"
-                  placeholder="e.g. Sliced Bacon, Sharp Cheddar"
+                  placeholder="e.g. Sliced Bacon, Paneer, Tomatoes"
                   value={formName}
                   onChange={e => {
                     setFormName(e.target.value);
@@ -691,9 +910,6 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                   className="w-full px-3.5 py-2.5 text-sm sm:text-base font-bold text-[#2B170C] bg-[#FBF5E6] border-2 border-[#2B170C] rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#E53935] min-h-[44px]"
                   autoFocus
                 />
-                <span className="text-xs text-gray-700 font-semibold mt-0.5 block">
-                  Duplicates are merged into the existing item automatically.
-                </span>
               </div>
 
               {/* Category Selector */}
@@ -703,14 +919,14 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                   <span>Category *</span>
                 </label>
                 <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Category selection">
-                  {(['protein', 'carb', 'produce', 'dairy', 'spices', 'flavor', 'other'] as const).map(cat => (
+                  {(['produce', 'protein', 'dairy', 'carb', 'spices', 'flavor', 'other'] as const).map(cat => (
                     <button
                       key={cat}
                       type="button"
                       role="radio"
                       aria-checked={formCategory === cat}
                       onClick={() => setFormCategory(cat)}
-                      className={`min-h-[42px] py-1.5 px-1 rounded-xl border-2 border-[#2B170C] text-xs font-black capitalize flex items-center justify-center gap-1 cursor-pointer ${
+                      className={`min-h-[40px] py-1 px-1 rounded-xl border-2 border-[#2B170C] text-xs font-black capitalize flex items-center justify-center gap-1 cursor-pointer ${
                         formCategory === cat
                           ? 'bg-[#E53935] text-white shadow-[1px_1px_0px_#2B170C]'
                           : 'bg-[#FFFDF8] text-[#2B170C] hover:bg-[#FFF9C4]'
@@ -763,7 +979,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 </div>
               </div>
 
-              {/* Expiry Date (Optional) */}
+              {/* Expiry Date (Optional, especially for perishables) */}
               <div>
                 <label htmlFor="ingredient-expiry" className="block text-xs sm:text-sm font-heading font-black text-[#2B170C] uppercase tracking-wider mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -836,15 +1052,15 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
                 </div>
               </div>
 
-              {/* In Fridge Toggle */}
+              {/* In Stock Toggle */}
               <div className="flex items-center justify-between p-3 rounded-xl border-2 border-[#2B170C] bg-[#FBF5E6]">
                 <div className="flex items-center gap-2.5">
-                  <span className="text-xl">🧊</span>
+                  <span className="text-xl">✅</span>
                   <div>
                     <label htmlFor="modal-in-fridge" className="text-xs sm:text-sm font-black text-[#2B170C] cursor-pointer block">
-                      Currently In Fridge
+                      Currently Available in Kitchen
                     </label>
-                    <p className="text-xs text-[#2B170C]/80 font-medium">Ready to be spun on the roulette reels</p>
+                    <p className="text-xs text-[#2B170C]/80 font-medium">Ready for recipe matching & reels</p>
                   </div>
                 </div>
 
@@ -896,7 +1112,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
               REMOVE INGREDIENT?
             </h3>
             <p className="text-xs sm:text-sm text-[#2B170C] mt-1.5 font-bold">
-              Are you sure you want to remove <b>"{deletingItem.name}"</b> from your diner pantry?
+              Are you sure you want to remove <b>"{deletingItem.name}"</b> from your diner inventory?
             </p>
 
             <div className="flex items-center gap-2.5 mt-5">
@@ -920,7 +1136,7 @@ export const FridgePantry: React.FC<FridgePantryProps> = ({
       {/* Helpful Diner Note */}
       <div className="flex items-center justify-center gap-2 text-xs sm:text-sm text-[#2B170C] font-semibold text-center">
         <Info className="w-4 h-4 text-[#E53935] shrink-0" />
-        <span>Ingredients marked with <b>⚠️ USE SOON</b> are favored when spinning the reels!</span>
+        <span>Fridge & freezer perishables take top priority to prevent food waste!</span>
       </div>
     </div>
   );
