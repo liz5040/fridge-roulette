@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+@theme {
+  --font-retro: 'Titan One', cursive, sans-serif;
+  --font-heading: 'Fredoka', cursive, sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --font-ticket: 'Special Elite', monospace, cursive;
+
+  --color-tomato-50: #fff5f5;
+  --color-tomato-100: #ffe3e3;
+  --color-tomato-200: #ffc9c9;
+  --color-tomato-300: #ffa8a8;
+  --color-tomato-400: #ff6b6b;
+  --color-tomato-500: #e53935;
+  --color-tomato-600: #d32f2f;
+  --color-tomato-700: #c62828;
+  --color-tomato-800: #b71c1c;
+
+  --color-butter-50: #fffde7;
+  --color-butter-100: #fff9c4;
+  --color-butter-200: #fff59d;
+  --color-butter-300: #fff176;
+  --color-butter-400: #ffee58;
+  --color-butter-500: #fbc02d;
+  --color-butter-600: #f57f17;
+  --color-butter-700: #e65100;
+
+  --color-cream-50: #fffdfa;
+  --color-cream-100: #fdf8ec;
+  --color-cream-200: #f5eedc;
+  --color-cream-300: #ebdcc0;
+  --color-cream-400: #dfc8a5;
+
+  --color-diner-ink: #2b170c;
+  --color-diner-brown: #3e2723;
+  --color-diner-mint: #2e8b57;
+  --color-diner-teal: #1976d2;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: #fbf5e6;
+  color: #2b170c;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Accessible focus visible rings */
+:focus-visible {
+  outline: 3px solid #2b170c !important;
+  outline-offset: 2px !important;
+}
+
+/* Reduced motion accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+h1, h2, h3, .font-heading {
+  font-family: var(--font-heading);
+}
+
+.font-retro {
+  font-family: var(--font-retro);
+}
+
+.font-ticket {
+  font-family: var(--font-ticket);
+}
+
+/* Subtle Retro Diner Checkerboard Patterns */
+.bg-checker-diner {
+  background-image: 
+    linear-gradient(45deg, #2b170c 25%, transparent 25%), 
+    linear-gradient(-45deg, #2b170c 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #2b170c 75%), 
+    linear-gradient(-45deg, transparent 75%, #2b170c 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+.bg-checker-tomato {
+  background-image: 
+    linear-gradient(45deg, #e53935 25%, transparent 25%), 
+    linear-gradient(-45deg, #e53935 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #e53935 75%), 
+    linear-gradient(-45deg, transparent 75%, #e53935 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0px;
+}
+
+.bg-checker-subtle {
+  background-image: 
+    linear-gradient(45deg, rgba(229, 57, 53, 0.08) 25%, transparent 25%), 
+    linear-gradient(-45deg, rgba(229, 57, 53, 0.08) 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, rgba(229, 57, 53, 0.08) 75%), 
+    linear-gradient(-45deg, transparent 75%, rgba(229, 57, 53, 0.08) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0px;
+}
+
+/* Tactile 3D Diner Arcade Buttons */
+.btn-tactile-red {
+  background: #e53935;
+  color: #ffffff;
+  border: 3px solid #2b170c;
+  box-shadow: 0 5px 0 #2b170c, 0 7px 12px rgba(43, 23, 12, 0.2);
+  transition: all 0.08s ease;
+}
+.btn-tactile-red:hover {
+  background: #f04440;
+}
+.btn-tactile-red:active {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #2b170c, 0 3px 6px rgba(43, 23, 12, 0.2);
+}
+
+.btn-tactile-yellow {
+  background: #fbc02d;
+  color: #2b170c;
+  border: 3px solid #2b170c;
+  box-shadow: 0 5px 0 #2b170c, 0 7px 12px rgba(43, 23, 12, 0.2);
+  transition: all 0.08s ease;
+}
+.btn-tactile-yellow:hover {
+  background: #fdd835;
+}
+.btn-tactile-yellow:active {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 #2b170c, 0 3px 6px rgba(43, 23, 12, 0.2);
+}
+
+.btn-tactile-cream {
+  background: #fffdf9;
+  color: #2b170c;
+  border: 3px solid #2b170c;
+  box-shadow: 0 4px 0 #2b170c, 0 6px 10px rgba(43, 23, 12, 0.15);
+  transition: all 0.08s ease;
+}
+.btn-tactile-cream:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2b170c, 0 2px 4px rgba(43, 23, 12, 0.15);
+}
+
+/* Diner Card with crisp 3D outline */
+.diner-card {
+  background-color: #fffdf9;
+  border: 3px solid #2b170c;
+  border-radius: 1.25rem;
+  box-shadow: 4px 5px 0 #2b170c;
+}
+
+.diner-card-sm {
+  background-color: #fffdf9;
+  border: 2px solid #2b170c;
+  border-radius: 1rem;
+  box-shadow: 3px 3px 0 #2b170c;
+}
+
+/* Diner Order Guest Check Jagged / Perforated Border */
+.diner-receipt-top {
+  position: relative;
+}
+.diner-receipt-top::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: radial-gradient(circle, transparent, transparent 50%, #fffdf8 50%, #fffdf8 100%);
+  background-size: 14px 14px;
+}
+
+/* Retro Diner Text Shadow */
+.retro-title-shadow {
+  text-shadow: 
+    2px 2px 0 #2b170c,
+    4px 4px 0 #fbc02d;
+}
+
+.retro-title-white {
+  text-shadow: 
+    2px 2px 0 #2b170c,
+    4px 4px 0 rgba(0, 0, 0, 0.25);
+}
+
+.retro-stamp {
+  transform: rotate(-4deg);
+  border: 3px dashed #e53935;
+  color: #e53935;
+  font-family: var(--font-ticket);
+  letter-spacing: 0.15em;
+}
+
+/* Custom scrollbar for pantry and reels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f7eedc;
+}
+::-webkit-scrollbar-thumb {
+  background: #e53935;
+  border-radius: 9999px;
+  border: 1px solid #2b170c;
+}
+
+/* Slot Reel Animation */
+@keyframes reelBlurSpin {
+  0% { transform: translateY(0%); }
+  50% { transform: translateY(-50%); filter: blur(1.5px); }
+  100% { transform: translateY(-100%); }
+}
+
+.animate-reel-blur {
+  animation: reelBlurSpin 0.35s linear infinite;
+}
+
+@keyframes dinerBulbPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.92); }
+}
+
+.animate-bulb {
+  animation: dinerBulbPulse 1.8s ease-in-out infinite;
+}

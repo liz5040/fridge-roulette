@@ -1,0 +1,18 @@
+{
+  "name": "Fridge Roulette — Retro Diner Cooking Game",
+  "short_name": "Fridge Roulette",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBF5E6",
+  "theme_color": "#E53935",
+  "description": "Turn your fridge leftovers into retro diner classics with a lucky slot spin!",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
