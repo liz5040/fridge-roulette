@@ -155,6 +155,28 @@ Spun with Fridge Roulette 🎰`;
             </div>
           )}
 
+          {/* AI Chef Reason & Fridge Match Explanation */}
+          {recipe.matchReason && (
+            <div className="p-3 bg-[#EBF5EE] border-2 border-[#2E7D32] rounded-xl flex items-start gap-2.5 shadow-[1px_2px_0px_#2B170C]">
+              <span className="text-2xl shrink-0" aria-hidden="true">👨‍🍳</span>
+              <div className="flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[11px] font-black text-[#1B5E20] uppercase tracking-wider">
+                    {recipe.isAiGenerated ? '★ AI Diner Chef Explanation' : '★ Verified House Match'}
+                  </p>
+                  {recipe.isAiGenerated && (
+                    <span className="text-[9px] bg-[#1B5E20] text-[#FFF9C4] px-1.5 py-0.2 rounded font-mono font-bold tracking-wider">
+                      GROQ LLAMA 3.3
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs sm:text-sm font-bold text-[#2B170C] mt-0.5 leading-snug">
+                  {recipe.matchReason}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Ingredients Section */}
           <div>
             <div className="flex items-center justify-between pb-1 border-b-2 border-[#2B170C]/20 mb-2">

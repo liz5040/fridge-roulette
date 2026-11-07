@@ -43,6 +43,8 @@ export interface DinerRecipe {
   chaosTwist?: string;
   wasteSavedLbs: number;
   matchScore?: number;
+  matchReason?: string;
+  isAiGenerated?: boolean;
 }
 
 export interface CuratedRecipeDefinition {

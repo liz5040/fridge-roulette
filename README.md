@@ -40,7 +40,16 @@ A mobile-first cooking companion and meal generator that combines playful food-a
    - Sizzling griddle sound effect during Cook Mode.
    - 1950s diner Doo-Wop Jukebox tunes toggle.
 
-3. **Chef's Diner Guest Check**:
+3. **Short-Order AI Diner Chef (Powered by Groq Llama 3.3)**:
+   - Natural-language request order pad: type requests like *"I want a spicy vegetarian dinner under 20 minutes"* or tap quick craving chips.
+   - Context-aware cooking: strictly uses the user's available fridge items and highlights expiring-soon ingredients to prevent food waste.
+   - Multicultural variations: Indian (South Indian, Kerala, North Indian), Western comfort food, and Fusion mashups.
+   - Chef's match reasoning: explains why each recipe was crafted for your specific fridge stock.
+   - Strict ingredient honesty: clearly identifies missing items with substitutions and never pretends missing items are in the fridge.
+   - Graceful offline fallback: seamlessly falls back to the verified 50-recipe engine if the AI service is offline or unconfigured.
+   - Secure backend proxy: API keys are kept safely on the server and never exposed to the frontend.
+
+4. **Chef's Diner Guest Check**:
    - Vintage perforated order ticket with stamps and table numbers.
    - Ingredients breakdown with smart pantry substitution suggestions.
    - Interactive step-by-step checklist.
@@ -81,6 +90,10 @@ A mobile-first cooking companion and meal generator that combines playful food-a
 ```bash
 # Install dependencies
 npm install
+
+# (Optional) Add your Groq API key for AI Diner Chef in .env
+cp .env.example .env
+# Edit .env and set: GROQ_API_KEY=your_key_here
 
 # Run the dev server
 npm run dev

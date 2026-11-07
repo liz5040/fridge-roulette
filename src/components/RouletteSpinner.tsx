@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Lock, Unlock, Flame, RotateCw, Sparkles, ChefHat } from 'lucide-react';
+import { Lock, Unlock, Flame, RotateCw, Sparkles, ChefHat, AlertCircle, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { CHAOS_TWISTS, getExpiryInfo } from '../data/ingredients';
 import type { Ingredient } from '../data/ingredients';
 import { generateDinerRecipe } from '../data/recipes';
-import type { DinerRecipe, CuisineType } from '../data/recipes';
+import type { DinerRecipe, CuisineType, DietType } from '../data/recipes';
 import { sounds } from '../utils/soundEffects';
 import { IngredientIcon } from '../utils/ingredientIcons';
+import { requestAiChefRecipe } from '../services/aiChefService';
 
 interface RouletteSpinnerProps {
   pantry: Ingredient[];
@@ -114,6 +115,100 @@ export const RouletteSpinner: React.FC<RouletteSpinnerProps> = ({
   // Cuisine & Meal Filters
   const [cuisineFilter, setCuisineFilter] = useState<'all' | CuisineType>('all');
   const [mealFilter, setMealFilter] = useState<'all' | 'breakfast' | 'melts' | 'speedy'>('all');
+
+  // AI Chef State
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [dietaryPreference, setDietaryPreference] = useState<'all' | DietType>('all');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiLoadingMessage, setAiLoadingMessage] = useState('Short-Order Chef is checking your fridge...');
+  const [aiNotice, setAiNotice] = useState<{ type: 'info' | 'warning' | 'error'; text: string } | null>(null);
+  const [isAiPadOpen, setIsAiPadOpen] = useState(true);
+
+  // Quick Chef prompt chips
+  const QUICK_PROMPTS = [
+    { label: '🌶️ Spicy Veg in 15m', prompt: 'I want a spicy vegetarian dinner under 15 minutes', diet: 'veg' as const },
+    { label: '🇮🇳 Kerala / Desi Comfort', prompt: 'Homestyle Indian comfort meal with spices, curry leaves and aromatics', diet: 'all' as const },
+    { label: '🧀 Late-Night Cheesy Melt', prompt: 'Crispy diner melt with gooey cheese and caramelized goodness', diet: 'all' as const },
+    { label: '🌮 Fusion Street Mashup', prompt: 'Creative cross-culture fusion street food using my fridge items', diet: 'all' as const },
+    { label: '🧹 Rescue Expiring Items', prompt: 'Prioritize and rescue whatever is expiring in my fridge right now', diet: 'all' as const },
+  ];
+
+  // Request recipe from AI Diner Chef powered by Groq
+  const handleAskAiChef = async (overridePrompt?: string, overrideDiet?: DietType | 'all') => {
+    if (isAiLoading || isSpinning) return;
+    const promptToUse = (overridePrompt ?? aiPrompt).trim() || 'Cook me an unforgettable diner meal using my fridge ingredients!';
+    const dietToUse = overrideDiet ?? dietaryPreference;
+
+    sounds.playBoop(700);
+    setIsAiLoading(true);
+    setAiNotice(null);
+
+    const loadingStages = [
+      '🍳 Short-Order AI Chef is reading your fridge...',
+      '🔥 Firing up the griddle & checking expiring ingredients...',
+      '🌶️ Crafting authentic Indian, Western or Fusion variations...',
+      '🧾 Balancing cook times & writing step-by-step instructions...',
+    ];
+    let stage = 0;
+    setAiLoadingMessage(loadingStages[0]);
+    const timer = window.setInterval(() => {
+      stage = (stage + 1) % loadingStages.length;
+      setAiLoadingMessage(loadingStages[stage]);
+    }, 1300);
+
+    try {
+      const result = await requestAiChefRecipe({
+        prompt: promptToUse,
+        pantry,
+        selectedReels: {
+          protein: currentProtein,
+          carb: currentCarb,
+          produce: currentProduce,
+          flavor: currentFlavor,
+        },
+        cuisineFilter,
+        mealFilter,
+        dietaryPreference: dietToUse,
+        chaosTwist: chaosMode && activeTwist ? activeTwist : undefined,
+      });
+
+      clearInterval(timer);
+      setIsAiLoading(false);
+
+      if (result.notice) {
+        setAiNotice(result.notice);
+        setTimeout(() => setAiNotice(null), 7000);
+      }
+
+      sounds.playDinerBell();
+      sounds.playWinJingle();
+
+      confetti({
+        particleCount: 50,
+        spread: 70,
+        origin: { y: 0.65 },
+        colors: ['#E53935', '#FBC02D', '#2B170C', '#4CAF50'],
+      });
+
+      onIncrementSpins();
+      onRecipeGenerated(result.recipe);
+    } catch (err: any) {
+      clearInterval(timer);
+      setIsAiLoading(false);
+      console.warn('AI Chef exception, using verified house recipe:', err);
+
+      const fallback = generateDinerRecipe(
+        { protein: currentProtein, carb: currentCarb, produce: currentProduce, flavor: currentFlavor },
+        chaosMode && activeTwist ? activeTwist : undefined,
+        pantry,
+        cuisineFilter,
+        mealFilter
+      );
+      fallback.matchReason = 'Switched to verified House Special recipe.';
+      sounds.playDinerBell();
+      onRecipeGenerated(fallback);
+    }
+  };
 
   // Audio interval ref for ticking sound
   const tickIntervalRef = useRef<number | null>(null);
@@ -499,13 +594,13 @@ export const RouletteSpinner: React.FC<RouletteSpinnerProps> = ({
       <button
         type="button"
         onClick={spinRoulette}
-        disabled={isSpinning}
+        disabled={isSpinning || isAiLoading}
         aria-label={isSpinning ? 'Reels are spinning...' : 'Pull and spin the roulette reels'}
-        className={`w-full min-h-[58px] py-4 rounded-2xl font-retro text-xl sm:text-2xl tracking-wider uppercase flex items-center justify-center gap-2.5 cursor-pointer btn-tactile-red ${
-          isSpinning ? 'opacity-70 cursor-not-allowed' : ''
+        className={`w-full min-h-[56px] py-3.5 rounded-2xl font-retro text-lg sm:text-xl tracking-wider uppercase flex items-center justify-center gap-2.5 cursor-pointer btn-tactile-red ${
+          isSpinning || isAiLoading ? 'opacity-70 cursor-not-allowed' : ''
         }`}
       >
-        <RotateCw className={`w-6 h-6 ${isSpinning ? 'animate-spin' : ''}`} />
+        <RotateCw className={`w-5 h-5 ${isSpinning ? 'animate-spin' : ''}`} />
         <span>{isSpinning ? 'SPINNING THE GRIDDLE...' : 'PULL & SPIN ROULETTE!'}</span>
         <Sparkles className="w-5 h-5 text-[#FBC02D]" />
       </button>
@@ -513,8 +608,201 @@ export const RouletteSpinner: React.FC<RouletteSpinnerProps> = ({
       {/* Mini Helper Info */}
       <div className="flex items-center justify-center gap-2 text-xs sm:text-sm text-[#2B170C] font-semibold">
         <ChefHat className="w-4 h-4 text-[#E53935]" />
-        <span>Tap <b>HOLD</b> on any ingredient you already want to use!</span>
+        <span>Tap <b>HOLD</b> on reels to lock ingredients, or ask AI Chef below!</span>
       </div>
+
+      {/* Toast Notice Banner if Fallback or AI Info */}
+      {aiNotice && (
+        <div
+          role="alert"
+          className="p-3 bg-[#FFF9C4] border-2 border-[#2B170C] rounded-xl flex items-center justify-between gap-2 shadow-[2px_2px_0px_#2B170C] animate-in fade-in duration-200"
+        >
+          <div className="flex items-center gap-2 text-xs font-bold text-[#2B170C]">
+            <AlertCircle className="w-4 h-4 text-[#E53935] shrink-0" />
+            <span>{aiNotice.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAiNotice(null)}
+            className="p-1 text-gray-700 hover:text-black cursor-pointer"
+            aria-label="Dismiss notice"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SHORT-ORDER AI DINER CHEF ORDER PAD (POWERED BY GROQ)                     */}
+      {/* ========================================================================= */}
+      <div className="bg-[#FFFDF8] border-3 border-[#2B170C] rounded-2xl p-3 sm:p-4 shadow-[4px_4px_0px_#2B170C] flex flex-col gap-3">
+        {/* Header Row */}
+        <div className="flex items-center justify-between gap-2 pb-2 border-b-2 border-[#2B170C]/15">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-[#FBC02D] border-2 border-[#2B170C] flex items-center justify-center text-xl shadow-[1px_1px_0px_#2B170C]">
+              👨‍🍳
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-heading font-black text-xs sm:text-sm text-[#2B170C] uppercase tracking-wider">
+                  Short-Order AI Chef
+                </h3>
+                <span className="text-[10px] bg-[#2E7D32] text-white px-1.5 py-0.2 rounded font-mono font-bold tracking-wide">
+                  GROQ LLAMA 3.3
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-[#2B170C]/80 font-semibold">
+                Cooks creative meals tailored to your fridge stock
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsAiPadOpen(!isAiPadOpen)}
+            className="text-xs font-black text-[#E53935] hover:underline cursor-pointer py-1 px-1.5 shrink-0"
+          >
+            {isAiPadOpen ? 'Hide Pad ▲' : 'Open Pad ▾'}
+          </button>
+        </div>
+
+        {/* Collapsible Order Pad Body */}
+        {isAiPadOpen && (
+          <div className="flex flex-col gap-3 animate-in fade-in duration-150">
+            {/* Natural Language Prompt Input */}
+            <div>
+              <label htmlFor="ai-chef-prompt" className="block text-[11px] font-heading font-black text-[#2B170C] uppercase tracking-wider mb-1">
+                Special Request / Craving:
+              </label>
+              <div className="relative flex items-center">
+                <input
+                  id="ai-chef-prompt"
+                  type="text"
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAskAiChef();
+                    }
+                  }}
+                  placeholder='e.g. "Spicy vegetarian dinner under 20 minutes"'
+                  disabled={isAiLoading}
+                  className="w-full px-3 py-2 pr-9 text-xs sm:text-sm font-bold text-[#2B170C] bg-[#FBF5E6] border-2 border-[#2B170C] rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#E53935] min-h-[42px]"
+                />
+                {aiPrompt ? (
+                  <button
+                    type="button"
+                    onClick={() => setAiPrompt('')}
+                    className="absolute right-2.5 p-1 text-gray-500 hover:text-black cursor-pointer"
+                    aria-label="Clear request input"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <ChefHat className="w-4 h-4 text-gray-400 absolute right-2.5 pointer-events-none" />
+                )}
+              </div>
+            </div>
+
+            {/* Quick Prompt Suggestion Chips */}
+            <div>
+              <p className="text-[10px] font-black text-[#2B170C]/70 uppercase tracking-wider mb-1">
+                Quick Diner Cravings:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_PROMPTS.map(qp => (
+                  <button
+                    key={qp.label}
+                    type="button"
+                    onClick={() => {
+                      setAiPrompt(qp.prompt);
+                      handleAskAiChef(qp.prompt, qp.diet);
+                    }}
+                    disabled={isAiLoading}
+                    className="min-h-[28px] px-2.5 py-0.5 rounded-lg text-[11px] font-black bg-[#FBF5E6] hover:bg-[#FFF9C4] text-[#2B170C] border border-[#2B170C]/40 transition-all cursor-pointer shadow-[1px_1px_0px_#2B170C] active:translate-y-0.5"
+                  >
+                    {qp.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Dietary Preference Filter Row */}
+            <div className="flex items-center justify-between gap-1 pt-1 border-t border-[#2B170C]/10 text-xs">
+              <span className="text-[11px] font-black text-[#2B170C] uppercase tracking-wider shrink-0">
+                Dietary:
+              </span>
+              <div className="flex items-center gap-1 overflow-x-auto">
+                {[
+                  { id: 'all', label: 'All Diets' },
+                  { id: 'veg', label: '🟢 Veg' },
+                  { id: 'egg', label: '🟡 Egg' },
+                  { id: 'non-veg', label: '🔴 Non-Veg' },
+                ].map(d => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setDietaryPreference(d.id as any)}
+                    className={`min-h-[26px] px-2 py-0.5 rounded-full text-[11px] font-black border transition-all cursor-pointer ${
+                      dietaryPreference === d.id
+                        ? 'bg-[#2B170C] text-[#FFF9C4] border-[#2B170C]'
+                        : 'bg-[#FFFDF8] text-[#2B170C] border-[#2B170C]/30 hover:border-[#2B170C]'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Cook with AI Chef Action Button */}
+            <button
+              type="button"
+              onClick={() => handleAskAiChef()}
+              disabled={isAiLoading || isSpinning}
+              className={`w-full min-h-[48px] py-2.5 px-4 rounded-xl font-retro text-base sm:text-lg tracking-wider uppercase flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                isAiLoading
+                  ? 'bg-amber-300 text-[#2B170C] cursor-not-allowed opacity-90'
+                  : 'bg-[#FBC02D] hover:bg-[#FDD835] text-[#2B170C] border-2 border-[#2B170C] shadow-[3px_3px_0px_#2B170C] active:translate-y-0.5 active:shadow-none'
+              }`}
+            >
+              <ChefHat className={`w-5 h-5 ${isAiLoading ? 'animate-bounce text-[#E53935]' : 'text-[#E53935]'}`} />
+              <span>{isAiLoading ? 'CHEFFING UP YOUR DISH...' : '👨‍🍳 COOK WITH AI CHEF'}</span>
+              <Sparkles className="w-4 h-4 text-[#E65100]" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Full Loading Screen Overlay when AI Chef is cooking */}
+      {isAiLoading && (
+        <div
+          role="status"
+          aria-live="assertive"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+        >
+          <div className="bg-[#FFFDF8] border-4 border-[#2B170C] rounded-3xl p-6 max-w-sm w-full text-center shadow-[6px_8px_0px_#2B170C] flex flex-col items-center gap-3.5">
+            <div className="w-16 h-16 rounded-2xl bg-[#FFF9C4] border-3 border-[#2B170C] flex items-center justify-center text-4xl shadow-[2px_2px_0px_#2B170C] animate-bounce">
+              🍳
+            </div>
+            <div>
+              <h3 className="font-retro text-xl sm:text-2xl text-[#E53935] tracking-wide leading-tight">
+                ORDER IN PROGRESS!
+              </h3>
+              <p className="text-xs sm:text-sm font-heading font-black text-[#2B170C] mt-1">
+                {aiLoadingMessage}
+              </p>
+            </div>
+            <div className="w-full bg-[#F5EEDC] rounded-full h-2.5 border-2 border-[#2B170C] overflow-hidden">
+              <div className="bg-[#E53935] h-full rounded-full animate-pulse w-3/4" />
+            </div>
+            <p className="text-[11px] text-[#2B170C]/80 font-bold italic">
+              Analyzing available fridge items & checking freshness...
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
